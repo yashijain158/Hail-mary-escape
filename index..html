@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hail Mary Escape Room</title>
+<style>
+:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0;background:#03050a;color:#e6edf7;font-family:system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden}
+canvas{position:absolute;inset:0;display:block}
+.hud{position:absolute;pointer-events:none;font-size:13px;line-height:1.5}
+#top{top:10px;left:10px;background:#0009;padding:8px 12px;border:1px solid #ffb34766;border-radius:8px}
+#top b{color:#ffb347}
+#bots{top:10px;right:10px;background:#0009;padding:8px 12px;border:1px solid #4dd0e166;border-radius:8px;min-width:210px}
+#obj{bottom:12px;left:50%;transform:translateX(-50%);background:#000a;padding:8px 14px;border-radius:8px;max-width:80%;text-align:center}
+#cross{top:50%;left:50%;width:8px;height:8px;margin:-4px;border:1px solid #fff9;border-radius:50%}
+#tip{top:56%;left:50%;transform:translateX(-50%);color:#ffb347;font-weight:600}
+#toast{top:16%;left:50%;transform:translateX(-50%);background:#000c;padding:10px 16px;border-radius:8px;border:1px solid #ffb347;opacity:0;transition:opacity .3s;text-align:center}
+#flash{position:absolute;inset:0;background:#f00;opacity:0;pointer-events:none;transition:opacity .4s}
+.ov{position:absolute;inset:0;background:#000d;display:flex;align-items:center;justify-content:center;text-align:center;z-index:5}
+.card{background:#0b1220;border:1px solid #ffb34788;border-radius:12px;padding:22px 28px;max-width:520px}
+h1,h2{margin:0 0 8px;color:#ffb347}
+button{background:#ffb347;color:#111;border:0;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;margin:4px}
+input{font-size:26px;letter-spacing:8px;text-align:center;width:180px;padding:6px;background:#000;color:#4dd0e1;border:1px solid #4dd0e1;border-radius:8px}
+.hide{display:none}
+td{padding:2px 10px}
+</style></head><body>
+<div id="top" class="hud"></div><div id="bots" class="hud"></div>
+<div id="cross" class="hud"></div><div id="tip" class="hud"></div><div id="toast" class="hud"></div>
+<div id="obj" class="hud"></div><div id="flash"></div>
+<div id="start" class="ov"><div class="card"><h1>🚀 HAIL MARY ESCAPE</h1>
+<p>The Hail Mary is crippled. Astrophage lasers, a dark hull and a dead flight computer stand between you and Tau Ceti. Rocky is counting on you.</p>
+<p style="text-align:left;font-size:13px"><b>Stage 1</b> – cross the Astrophage laser grid (touch = +3:00 penalty, 3 touches = mission failed), scan the QR, enter the code.<br><b>Stage 2</b> – dark room: find 4 hidden “+” markers with your torch, build the code.<br><b>Stage 3</b> – disassemble the PC, read the code, enter it to finish.<br>Your 3 crewmates (Rocky, Stratt, Yao) play simultaneously – see the board.</p>
+<p style="font-size:12px;color:#9ab">WASD / arrows = move · Shift = run · drag mouse = look · click = interact</p>
+<button id="go">Start mission</button></div></div>
+<div id="pad" class="ov hide"><div class="card"><h2 id="ptitle">Keypad</h2><p id="pmsg" style="font-size:13px"></p>
+<input id="pin" maxlength="4" inputmode="numeric" autocomplete="off"><br><button id="pok">Enter</button><button id="pno" style="background:#334;color:#fff">Cancel</button></div></div>
+<div id="end" class="ov hide"><div class="card" id="endc"></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const R=THREE,$=i=>document.getElementById(i);
+const scene=new R.Scene();scene.background=new R.Color(0x03050a);scene.fog=new R.Fog(0x03050a,6,34);
+const cam=new R.PerspectiveCamera(72,innerWidth/innerHeight,.05,100);cam.rotation.order='YXZ';scene.add(cam);
+const ren=new R.WebGLRenderer({antialias:true});ren.setSize(innerWidth,innerHeight);ren.setPixelRatio(Math.min(devicePixelRatio,2));document.body.prepend(ren.domElement);
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight)});
+const amb=new R.AmbientLight(0x8899bb,.6);scene.add(amb);
+const W=20,D=12,H=4,GAP=24;
+function box(w,h,d,c,x,y,z,o={}){const m=new R.Mesh(new R.BoxGeometry(w,h,d),new R.MeshStandardMaterial({color:c,roughness:.8,metalness:o.m||0,emissive:o.e||0,emissiveIntensity:o.ei||1}));m.position.set(x,y,z);scene.add(m);return m}
+function tex(w,h,fn){const c=document.createElement('canvas');c.width=w;c.height=h;fn(c.getContext('2d'),w,h);return new R.CanvasTexture(c)}
+function plane(w,h,t,x,y,z,ry,basic){const m=new R.Mesh(new R.PlaneGeometry(w,h),basic?new R.MeshBasicMaterial({map:t,transparent:true}):new R.MeshStandardMaterial({map:t,transparent:true,roughness:1}));m.position.set(x,y,z);m.rotation.y=ry||0;scene.add(m);return m}
+function sign(t,w,x,y,z,ry,col){return plane(w,w/4,tex(512,128,(g,a,b)=>{g.fillStyle='#0008';g.fillRect(0,0,a,b);g.fillStyle=col||'#ffb347';g.font='bold 40px sans-serif';g.textAlign='center';g.textBaseline='middle';t.split('\n').forEach((s,i,ar)=>g.fillText(s,a/2,b/2+(i-(ar.length-1)/2)*46))}),x,y,z,ry,true)}
+function room(i,c){const x=i*GAP;box(W,.2,D,c,x+W/2,-.1,0);box(W,.2,D,0x10151f,x+W/2,H+.1,0);
+box(.2,H,D,c,x,H/2,0);box(.2,H,D,c,x+W,H/2,0);box(W,H,.2,c,x+W/2,H/2,-D/2);box(W,H,.2,c,x+W/2,H/2,D/2)}
+room(0,0x1b2433);room(1,0x161a22);room(2,0x1d2a2c);
+const cols=[],inter=[],lasers=[];
+const col=(x,z,w,d)=>cols.push([x-w/2,x+w/2,z-d/2,z+d/2]);
+function addI(m,name,fn,en){m.userData={name,fn,en:en||(()=>true)};inter.push(m);return m}
+const rnd=n=>Math.floor(Math.random()*n),pad4=()=>String(1000+rnd(9000));
+const code1=pad4(),code3=pad4(),dig=[0,0,0,0].map(()=>rnd(10)),code2=dig.join('');
+/* ---------- STAGE 1 : laser grid ---------- */
+let x0=0;
+[0xff6a3d].forEach(()=>{const l=new R.PointLight(0xff5533,1.1,12);l.position.set(10,3.5,0);scene.add(l)});
+sign('HAIL MARY · SECTION 1\nASTROPHAGE LASER GRID',8,1,2.6,0,Math.PI/2,'#ff8a5c');
+sign('DO NOT TOUCH THE BEAMS',6,10,3.4,-5.85,0,'#ff4d4d');
+sign('DO NOT TOUCH THE BEAMS',6,10,3.4,5.85,Math.PI,'#ff4d4d');
+const lmat=new R.MeshBasicMaterial({color:0xff2a2a});
+function staticCol(x,gc){const lo=gc-.7,hi=gc+.7;for(let y=.3;y<3.8;y+=.5){[[-D/2,lo],[hi,D/2]].forEach(([a,b])=>{const m=new R.Mesh(new R.BoxGeometry(.04,.04,b-a),lmat);m.position.set(x,y,(a+b)/2);scene.add(m)})}
+lasers.push({t:0,x,lo,hi});box(.3,H,.3,0x333,x,H/2,-D/2+.2);box(.3,H,.3,0x333,x,H/2,D/2-.2)}
+function sweepCol(x,s,ph){const m=new R.Mesh(new R.BoxGeometry(.06,H,.06),lmat);m.position.set(x,H/2,0);scene.add(m);lasers.push({t:1,x,s,ph,m})}
+staticCol(4,-2.5);sweepCol(6.5,1.6,0);staticCol(9,2.5);sweepCol(11.5,2.2,2);staticCol(14,-1.5);sweepCol(16,2.8,1);
+const qrT=tex(256,256,(g)=>{g.fillStyle='#fff';g.fillRect(0,0,256,256);const n=21,c=256/n;g.fillStyle='#000';for(let i=0;i<n;i++)for(let j=0;j<n;j++){const f=(i<8&&j<8)||(i>12&&j<8)||(i<8&&j>12);if(!f&&Math.random()<.5)g.fillRect(i*c,j*c,c,c)}
+[[0,0],[13,0],[0,13]].forEach(([a,b])=>{g.fillStyle='#000';g.fillRect(a*c,b*c,7*c,7*c);g.fillStyle='#fff';g.fillRect((a+1)*c,(b+1)*c,5*c,5*c);g.fillStyle='#000';g.fillRect((a+2)*c,(b+2)*c,3*c,3*c)})});
+let crossed=false,q1=false;
+box(1.7,1.7,.1,0x111,19.7,1.7,-3);const qr=plane(1.5,1.5,qrT,19.63,1.7,-3,-Math.PI/2);
+addI(qr,'Scan QR code',()=>{q1=true;toast('QR scanned → Stage-2 access code: <b style="font-size:22px">'+code1+'</b>');hud()},()=>crossed);
+const pad1=addI(box(.15,.5,.4,0x223344,19.8,1.4,3,{e:0x0a4a5a}),'Door keypad',()=>openPad('Section 2 door','Enter the code from the QR',code1,()=>openDoor(0)));
+let doors=[{m:box(.2,3.2,3,0x4a5568,19.8,1.6,0,{e:0x331100}),open:false}];
+/* ---------- STAGE 2 : dark room ---------- */
+x0=GAP;
+sign('SECTION 2 · DARK HULL',5,x0+.15,3.2,0,Math.PI/2,'#335');
+const crates=[[5,-5],[14,-5.2],[9,4.6],[16,4.6],[11,-1],[7,1.5],[16,-2]];
+crates.forEach(([x,z])=>{box(1.2,1.2,1.2,0x2b2f3a,x0+x,.6,z);col(x0+x,z,1.2,1.2)});
+box(.6,.6,3,0x2b2f3a,x0+3,.3,-3);col(x0+3,-3,.6,3);
+const spots=[[5,1.0,-5.9,0],[14,.5,-5.9,0],[9,2.4,5.9,Math.PI],[16,.45,5.9,Math.PI],[.1,1.5,2.5,Math.PI/2],[.1,.4,-3,Math.PI/2],[19.9,2.2,-4,-Math.PI/2],[19.9,.5,4.5,-Math.PI/2]];
+const order=[0,1,2,3].sort(()=>Math.random()-.5),pick=spots.map((s,i)=>[Math.random(),s]).sort((a,b)=>a[0]-b[0]).slice(0,4).map(a=>a[1]);
+const found=[null,null,null,null],markers=[];
+pick.forEach((s,k)=>{const p=order[k];const t=tex(256,256,(g)=>{g.fillStyle='#0a0f18';g.fillRect(0,0,256,256);g.strokeStyle='#ffb347';g.lineWidth=14;g.beginPath();g.moveTo(128,40);g.lineTo(128,150);g.moveTo(73,95);g.lineTo(183,95);g.stroke();g.fillStyle='#ffb347';g.font='bold 34px sans-serif';g.textAlign='center';g.fillText('DIGIT '+dig[p]+' · POS '+(p+1),128,205);g.font='20px sans-serif';g.fillText('HAIL MARY MARKER',128,238)});
+const m=plane(.55,.55,t,x0+s[0],s[1],s[2],s[3]);addI(m,'Marker (+)',()=>{if(found[p]!==null)return;found[p]=dig[p];m.visible=false;toast('Marker found: digit <b>'+dig[p]+'</b> at position <b>'+(p+1)+'</b>');hud()},()=>true);markers.push(m)});
+addI(box(.15,.5,.4,0x223344,x0+19.8,1.4,3,{e:0x0a3a4a}),'Door keypad',()=>openPad('Section 3 door','Enter the 4-digit code built from the markers',code2,()=>openDoor(1)));
+doors.push({m:box(.2,3.2,3,0x4a5568,x0+19.8,1.6,0,{e:0x110a00}),open:false});
+const torch=new R.SpotLight(0xfff0cc,3.2,15,.42,.45,1);cam.add(torch);const tt=new R.Object3D();tt.position.set(0,0,-1);cam.add(tt);torch.target=tt;torch.visible=false;
+/* ---------- STAGE 3 : PC ---------- */
+x0=2*GAP;
+{const l=new R.PointLight(0x66ffee,1.2,12);l.position.set(x0+10,3.5,0);scene.add(l)}
+sign('SECTION 3 · ENGINE CORE\nDISASSEMBLE THE FLIGHT COMPUTER',8,x0+.15,2.7,0,Math.PI/2,'#6ff');
+box(3.2,.12,3.2,0x555e6b,x0+10,.9,0);[[-1.4,-1.4],[1.4,-1.4],[-1.4,1.4],[1.4,1.4]].forEach(([a,b])=>box(.12,.9,.12,0x333,x0+10+a,.45,b));col(x0+10,0,3.4,3.4);
+const cx=x0+10,cy=1.78;[[.06,1.6,2,1.05,0,0],[2,.06,2,.1,.8,0],[2,.06,2,.1,-.8,0],[2,1.6,.06,.1,0,1],[2,1.6,.06,.1,0,-1]].forEach(a=>box(a[0],a[1],a[2],0x22262e,cx+a[3],cy+a[4],a[5],{m:.3}));
+const inner=box(.1,1.5,1.9,0x0b3d2e,cx-.85,cy,0,{e:0x04201a});
+const parts=[],names=['Side panel','GPU','RAM','CPU fan','Hard drive','Power supply'];let removed=0,panelOff=false,mb=null;
+function part(n,w,h,d,c,y,z,e){const m=box(w,h,d,c,cx-.95,cy+y,z,{e:e||0});parts.push(m);addI(m,'Remove: '+n,()=>{if(n!=='Side panel'&&!panelOff){toast('Remove the side panel first');return}m.visible=false;m.userData.gone=true;removed++;if(n==='Side panel')panelOff=true;if(removed===6){mb=plane(.9,.45,tex(256,128,g=>{g.fillStyle='#0b3d2e';g.fillRect(0,0,256,128);g.fillStyle='#6ff';g.font='bold 22px monospace';g.textAlign='center';g.fillText('MOTHERBOARD CODE',128,45);g.font='bold 52px monospace';g.fillText(code3,128,100)}),cx-.8,cy,0,-Math.PI/2,true);toast('Motherboard exposed! Code: <b style="font-size:22px">'+code3+'</b>')}hud()},()=>!m.userData.gone)}
+part('Side panel',.08,1.55,1.95,0x3b4350,0,0);
+// move internals slightly behind panel
+part('GPU',.3,.3,1.5,0x2d8a4e,.15,0,0x062010);parts[1].position.x=cx-.7;
+part('RAM',.15,.5,.5,0x3366cc,.5,.5,0x081530);parts[2].position.x=cx-.75;
+part('CPU fan',.25,.45,.45,0x888,.5,-.5);parts[3].position.x=cx-.75;
+part('Hard drive',.2,.3,.7,0xb0b7c3,-.45,.4);parts[4].position.x=cx-.75;
+part('Power supply',.4,.35,.9,0x111,-.6,-.4);parts[5].position.x=cx-.7;
+const term=addI(box(.15,.5,.5,0x223344,x0+19.8,1.4,0,{e:0x0a4a5a}),'Exit terminal',()=>openPad('Mission terminal','Enter the motherboard code to finish',code3,finish),()=>true);
+/* ---------- state ---------- */
+let stage=-1,running=false,modal=false,pen=0,hits=0,t0=0,inv=0,yaw=-Math.PI/2,pitch=0,finished=false;
+const keys={};addEventListener('keydown',e=>{if(!modal)keys[e.code]=1});addEventListener('keyup',e=>keys[e.code]=0);
+const starts=[[1.5,0],[GAP+1.5,0],[2*GAP+1.5,-4]];
+const objs=['Cross the laser grid without touching a beam (3 touches = fail). Then scan the QR and open the door.','Dark hull: use your torch to find 4 hidden “+” markers and build the 4-digit code (digit · position).','Disassemble the PC. Remove the side panel first, then every part, to reveal the code.'];
+function setStage(s){stage=s;const p=starts[s];cam.position.set(p[0],1.65,p[1]);yaw=-Math.PI/2;pitch=0;amb.intensity=[.55,.05,.55][s];torch.visible=s===1;scene.fog.far=s===1?20:34;hud()}
+function toast(h){const t=$('toast');t.innerHTML=h;t.style.opacity=1;clearTimeout(toast.k);toast.k=setTimeout(()=>t.style.opacity=0,4200);t.style.pointerEvents='none'}
+let padCb=null,padCode='';
+function openPad(t,m,c,cb){modal=true;padCb=cb;padCode=c;$('ptitle').textContent=t;$('pmsg').textContent=m;$('pin').value='';$('pad').classList.remove('hide');$('pin').focus();for(const k in keys)keys[k]=0}
+function closePad(){modal=false;$('pad').classList.add('hide')}
+$('pno').onclick=closePad;
+$('pok').onclick=()=>{if($('pin').value===padCode){closePad();padCb&&padCb()}else{$('pmsg').textContent='❌ Wrong code. Try again.';pen+=0}};
+$('pin').addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')$('pok').click();if(e.key==='Escape')closePad()});
+function openDoor(i){doors[i].open=true;toast('🔓 Door unlocked — walk through')}
+function fail(){running=false;$('end').classList.remove('hide');$('endc').innerHTML='<h2>💥 Mission failed</h2><p>3 laser touches — the Astrophage grid locked down the corridor.</p><button onclick="location.reload()">Retry</button>'}
+function fmt(s){s=Math.max(0,Math.floor(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+const el=()=>(performance.now()-t0)/1000;
+/* bots */
+const bots=['Rocky','Stratt','Yao'].map(n=>{const a=45+rnd(35),b=a+60+rnd(40),c=b+70+rnd(40);return{n,e:[a,b,c],pen:(Math.random()<.5?180:0)+(Math.random()<.2?180:0)}});
+function hud(){const e=el(),tot=e+pen;
+$('top').innerHTML=`<b>HAIL MARY</b> · Stage ${stage+1}/3<br>Time <b>${fmt(tot)}</b> (penalty +${fmt(pen)})<br>Lasers hit: ${hits}/3`+(stage===0&&q1?`<br>Code 1: <b>${code1}</b>`:'')+(stage===1?`<br>Code 2: <b>${found.map(f=>f===null?'_':f).join(' ')}</b>`:'')+(stage===2?`<br>Parts removed: ${removed}/6`+(mb?`<br>Code 3: <b>${code3}</b>`:''):'');
+$('obj').textContent=objs[stage]||'';
+$('bots').innerHTML='<b>👥 Crew (live)</b><table>'+['You (Grace)'].concat(bots.map(b=>b.n)).map((n,i)=>{let s,done;if(i===0){s=stage;done=finished}else{const b=bots[i-1];s=b.e.filter(x=>x<e).length;done=s>2}const bar=[0,1,2].map(k=>k<s||done?'🟩':k===s?'🟨':'⬛').join('');return`<tr><td>${n}</td><td>${bar}</td><td>${done?'✔':'S'+(s+1)}</td></tr>`}).join('')+'</table>'}
+function finish(){finished=true;running=false;const mine=el()+pen;const rows=[['You (Grace)',mine]].concat(bots.map(b=>[b.n,b.e[2]+b.pen])).sort((a,b)=>a[1]-b[1]);
+$('end').classList.remove('hide');$('endc').innerHTML=`<h2>🎉 Hail Mary complete!</h2><p>Your time: <b>${fmt(mine)}</b> (incl. ${fmt(pen)} penalty)</p><table style="margin:auto">${rows.map((r,i)=>`<tr><td>${i+1}.</td><td>${r[0]}</td><td>${fmt(r[1])}</td></tr>`).join('')}</table><button onclick="location.reload()">Play again (new codes)</button>`;hud()}
+$('go').onclick=()=>{$('start').classList.add('hide');running=true;t0=performance.now();setStage(0);toast('Rocky: “Fist my bump! Go through the lasers, question?”')};
+/* controls */
+let drag=null;const cv=ren.domElement;
+cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,mx:0}});
+addEventListener('pointermove',e=>{if(!drag||modal)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.mx+=Math.abs(dx)+Math.abs(dy);yaw-=dx*.004;pitch=Math.max(-1.3,Math.min(1.3,pitch-dy*.004));drag.x=e.clientX;drag.y=e.clientY});
+addEventListener('pointerup',()=>{if(drag&&drag.mx<6&&running&&!modal){const h=aim();if(h)h.userData.fn()}drag=null});
+const ray=new R.Raycaster();
+function aim(){ray.setFromCamera({x:0,y:0},cam);const hs=ray.intersectObjects(inter.filter(m=>m.visible),false);for(const h of hs){if(h.distance<4.2&&h.object.userData.en())return h.object;if(h.distance<4.2)return null}return null}
+const blocked=(x,z)=>cols.some(c=>c[0]>0&&x>c[0]-.3&&x<c[1]+.3&&z>c[2]-.3&&z<c[3]+.3&&(c[0]>stage*GAP-1&&c[1]<stage*GAP+W+1));
+function move(dt){const s=(keys.ShiftLeft?4.6:2.8)*dt;let fx=0,fz=0;if(keys.KeyW||keys.ArrowUp)fz--;if(keys.KeyS||keys.ArrowDown)fz++;if(keys.KeyA||keys.ArrowLeft)fx--;if(keys.KeyD||keys.ArrowRight)fx++;
+const sn=Math.sin(yaw),cs=Math.cos(yaw),dx=(fx*cs+fz*sn)*s,dz=(-fx*sn+fz*cs)*s,b=stage*GAP,p=cam.position;
+const xmax=doors[stage]&&doors[stage].open?b+W+.8:b+W-.7;
+if(!blocked(p.x+dx,p.z))p.x+=dx;if(!blocked(p.x,p.z+dz))p.z+=dz;
+p.x=Math.max(b+.4,Math.min(xmax,p.x));p.z=Math.max(-D/2+.5,Math.min(D/2-.5,p.z));
+if(doors[stage]&&doors[stage].open&&p.x>b+W-.3&&stage<2)setStage(stage+1);
+if(stage===0&&p.x>16.8&&!crossed){crossed=true;toast('Grid crossed! Scan the QR code on the wall.')}}
+function laserCheck(t){if(stage!==0||t<inv)return;const p=cam.position;for(const l of lasers){let hit=false;if(l.t===0)hit=Math.abs(p.x-l.x)<.22&&(p.z<l.lo||p.z>l.hi);else hit=Math.abs(p.x-l.x)<.25&&Math.abs(p.z-l.m.position.z)<.3;
+if(hit){hits++;pen+=180;inv=t+1.5;const f=$('flash');f.style.opacity=.6;setTimeout(()=>f.style.opacity=0,350);toast('⚠ LASER TOUCHED! +3:00 penalty ('+hits+'/3)');p.set(starts[0][0],1.65,0);crossed=false;if(hits>=3)fail();hud();return}}}
+let last=performance.now(),hAcc=0;
+function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now;const t=now/1000;
+lasers.forEach(l=>{if(l.t===1)l.m.position.z=Math.sin(t*l.s+l.ph)*5});
+if(running&&!modal){move(dt);laserCheck(t)}
+doors.forEach(d=>{const ty=d.open?5.4:1.6;d.m.position.y+=(ty-d.m.position.y)*Math.min(1,dt*2.5)});
+cam.position.y=1.65+Math.sin(t*9)*(running&&(keys.KeyW||keys.KeyS)?.02:0);cam.rotation.set(pitch,yaw,0);
+if(running){hAcc+=dt;if(hAcc>.5){hAcc=0;hud()}const a=!modal&&aim();$('tip').textContent=a?'Click: '+a.userData.name:''}
+ren.render(scene,cam);requestAnimationFrame(loop)}
+setStage(0);requestAnimationFrame(loop);
+</script></body></html>
